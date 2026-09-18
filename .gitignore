@@ -1,0 +1,56 @@
+.venv/
+venv/
+env/
+
+__pycache__/
+**/__pycache__/
+*.py[cod]
+
+.pytest_cache/
+.pytest_tmp/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+*.egg-info/
+dist/
+build/
+.tox/
+.nox/
+
+# Environment / secrets
+.env
+.env.*
+*.local.json
+config/collector.local.json
+config/connector.config.json
+
+# Connector CLI/runtime payloads are external dependencies, not source.
+docker/mcegold-cli/
+external/mcegold-cli/
+*.dll
+*.exe
+*.pdb
+*.runtimeconfig.json
+*.deps.json
+
+# SQLite/runtime data
+data/
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+
+# IDE/editor
+.vscode/
+.idea/
+
+# OS noise
+.DS_Store
+Thumbs.db

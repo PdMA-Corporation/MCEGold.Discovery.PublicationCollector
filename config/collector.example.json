@@ -1,0 +1,9 @@
+{
+  "cliPath": "/opt/mcegold-cli/MCEGold.Data.Services.Connector.Cli",
+  "connectorConfigPath": "/config/connector.config.json",
+  "discoveryDatabasePath": "/data/discovery_portal.db",
+  "pollingIntervalSeconds": 15,
+  "logLevel": "INFO",
+  "cliTimeoutSeconds": 60,
+  "includeRaw": false
+}

@@ -1,0 +1,22 @@
+services:
+  publication-collector:
+    build: .
+    environment:
+      MCEGOLD_COLLECTOR_CONFIG: /app/config/collector.example.json
+      MCEGOLD_CLI_PATH: /opt/mcegold-cli/MCEGold.Data.Services.Connector.Cli.dll
+      MCEGOLD_CONNECTOR_CONFIG_PATH: /config/connector.config.json
+      MCEGOLD_DISCOVERY_DATABASE_PATH: /data/discovery_portal.db
+      MCEGOLD_POLL_INTERVAL_SECONDS: "15"
+      MCEGOLD_LOG_LEVEL: INFO
+      MCEGOLD_HOST: ${MCEGOLD_HOST:-}
+      MCEGOLD_USERNAME: ${MCEGOLD_USERNAME:-}
+      MCEGOLD_PASSWORD: ${MCEGOLD_PASSWORD:-}
+      MCEGOLD_API_KEY: ${MCEGOLD_API_KEY:-}
+    volumes:
+      # Provide a Portal-created SQLite database at ./data/discovery_portal.db.
+      - ./data:/data
+      # Provide a local Connector CLI configuration file; do not commit secrets.
+      - ./config:/config:ro
+      # Set MCEGOLD_CLI_HOST_PATH to a separately obtained Connector CLI directory.
+      - ${MCEGOLD_CLI_HOST_PATH:-./external/mcegold-cli}:/opt/mcegold-cli:ro
+    restart: unless-stopped
