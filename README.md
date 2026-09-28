@@ -4,6 +4,8 @@ MCEGold.Discovery.PublicationCollector is a Python console collector for MCEGold
 
 This repository is intended to contain the collector source, tests, configuration templates, and public deployment examples. It does not include internal Git history or compiled Connector CLI output.
 
+For deployment details, see [docs/deployment.md](docs/deployment.md).
+
 ## Architecture Role
 
 PublicationCollector is one component in the MCEGold Discovery architecture:
@@ -16,9 +18,9 @@ PublicationCollector does not call MCEGold or ISBM HTTP endpoints directly. It i
 
 ## Current Public-Release Status
 
-This public-release candidate intentionally does not bundle `MCEGold.Data.Services.Connector.Cli` binaries. The Connector CLI is a required runtime dependency, but its final public distribution mechanism is not defined in this repository.
+This public-release candidate intentionally does not bundle `MCEGold.Data.Services.Connector.Cli` binaries. The Connector CLI is a required runtime dependency and is distributed separately through `MCEGold.Data.Services.Connector.Toolkit`.
 
-Until that is resolved, an external developer can inspect, test, and build the Python package, but a live collector run requires separately obtaining the Connector CLI and a compatible Portal-created SQLite database.
+The Collector v1.0.0 release is source-oriented. It provides this repository, Dockerfile, Compose example, configuration examples, documentation, license, and tests. GitHub source archives are sufficient for the Collector release; no separate Collector runtime package, wheel, bundled Connector CLI, or prebuilt Docker image is produced by this repository.
 
 ## Prerequisites
 
@@ -30,8 +32,7 @@ For source development and tests:
 
 For live collection:
 
-- A separately obtained `MCEGold.Data.Services.Connector.Cli`
-- A .NET runtime compatible with that Connector CLI. The current Dockerfile installs the .NET 8 runtime because the inspected bundled CLI metadata targeted .NET 8.
+- A separately obtained self-contained Linux `MCEGold.Data.Services.Connector.Cli` executable from `MCEGold.Data.Services.Connector.Toolkit`
 - A compatible SQLite database initialized by `MCEGold.Discovery.Portal` schema v17 or later
 - MCEGold Data Services connection settings supplied through the Portal local config or process environment
 
@@ -50,7 +51,7 @@ Before a live run, edit `config\collector.local.json` for your local paths. Do n
 
 ## Configuration
 
-The collector loads JSON configuration from `MCEGOLD_COLLECTOR_CONFIG` when set. `config/collector.example.json` is a safe template using Docker-oriented example paths:
+The collector loads JSON configuration from `MCEGOLD_COLLECTOR_CONFIG` when set. `config/collector.example.json` is a safe template using Docker-oriented example paths. The public Docker examples use `/opt/mcegold-cli/MCEGold.Data.Services.Connector.Cli`, which matches the self-contained Linux Connector CLI executable distributed through `MCEGold.Data.Services.Connector.Toolkit`.
 
 - `cliPath`: path to `MCEGold.Data.Services.Connector.Cli`; may point to an executable or a `.dll`
 - `connectorConfigPath`: Connector CLI configuration file path
@@ -86,7 +87,7 @@ The collector passes those values to the Connector CLI as:
 - `MCEGOLD_PASSWORD`
 - `MCEGOLD_API_KEY`
 
-Do not commit real connector credentials, API keys, `.env` files, `connector.config.json`, or `collector.local.json`.
+Do not commit real connector credentials, API keys, `.env` files, `connector.config.json`, `collector.local.json`, or `portal.local.json`.
 
 ## Connector CLI Dependency
 
@@ -99,9 +100,13 @@ MCEGold.Data.Services.Connector.Cli publication remove --config <config> --sessi
 MCEGold.Data.Services.Connector.Cli publication close-subscription --config <config> --session-id <sessionId> --output json
 ```
 
-When `cliPath` points to a `.dll`, the collector invokes it as `dotnet <path>`. Otherwise it invokes the configured executable path directly.
+For supported public Linux deployment, set `cliPath` or `MCEGOLD_CLI_PATH` to the self-contained executable:
 
-This repository does not currently provide a verified public download, package feed, or release channel for the Connector CLI. That remains a public-release blocker for complete runtime use.
+```text
+/opt/mcegold-cli/MCEGold.Data.Services.Connector.Cli
+```
+
+The Collector invokes that executable directly. The application still supports `.dll` paths for source-build or development scenarios by invoking them as `dotnet <path>`, but the published Linux deployment model should not require a system .NET runtime solely for the Connector CLI.
 
 ## Database Dependency
 
@@ -115,15 +120,17 @@ SQLite schemas created inside `tests/` are test fixtures only. They are not a su
 
 The worker opens one subscription session, reads publications without overlapping read calls, parses `syncMeasurements`, checks `DimMeasurementLocation.MeasurementLocationUuid`, persists known measurements to `FactMeasurement`, and removes a publication only after successful handling.
 
-Unknown measurement locations are retained for later retry and may trigger bottom-up discovery behavior where implemented. The collector also writes heartbeat/runtime status to `CollectorRuntimeStatus`, reads control settings from `ApplicationSetting`, and can run measurement retention cleanup based on Portal-owned settings.
+Unknown measurement locations trigger automatic, on-demand bottom-up discovery during publication processing. The targeted discovery path can resolve the triggering measurement location, its segment, associated site information when required, and measurement locations associated with the relevant segment. The collector does not run a separate inventory-wide discovery or historical replay workflow. If bottom-up discovery or the follow-up lookup/persistence step fails, the original publication is retained for retry.
+
+The collector also writes heartbeat/runtime status to `CollectorRuntimeStatus`, reads control settings from `ApplicationSetting`, and can run measurement retention cleanup based on Portal-owned settings.
 
 ## Docker
 
 The Dockerfile installs the Python package and prepares expected directories under `/app`, `/config`, `/data`, and `/opt/mcegold-cli`.
 
-The image intentionally does not copy `docker/mcegold-cli/` or any compiled Connector CLI payload. To run the container, provide the Connector CLI separately at `/opt/mcegold-cli` and provide a Portal-created database at `/data/discovery_portal.db`.
+The image intentionally does not copy `docker/mcegold-cli/`, download the Connector CLI, or include any compiled Connector CLI payload. The Collector image also does not install .NET solely for the Connector CLI because the supported Linux Toolkit CLI is self-contained. To run the container, provide the Connector CLI separately at `/opt/mcegold-cli/MCEGold.Data.Services.Connector.Cli` and provide a Portal-created database at `/data/discovery_portal.db`.
 
-Because the Connector CLI public distribution mechanism is unresolved, Docker source structure is prepared, but full runtime image use remains blocked until a legitimate Connector CLI acquisition path is selected.
+Ensure the mounted Linux CLI file is executable on the host before starting the container.
 
 ## Compose Example
 
@@ -133,7 +140,7 @@ Typical local use requires:
 
 - `./data/discovery_portal.db`: a compatible Portal-created SQLite database
 - `./config/connector.config.json`: local Connector CLI config, excluded from Git
-- `MCEGOLD_CLI_HOST_PATH`: host directory containing the separately obtained Connector CLI
+- `MCEGOLD_CLI_HOST_PATH`: host directory containing the separately obtained self-contained Linux Connector CLI executable
 - MCEGold connection settings supplied through environment, `.env`, Docker secrets, or another local injection mechanism
 
 Example:
@@ -156,10 +163,10 @@ The test suite uses synthetic credential-looking strings such as `secret`, `supe
 ## Troubleshooting
 
 - `Missing required configuration`: confirm `MCEGOLD_COLLECTOR_CONFIG` or the individual environment overrides point to valid paths.
-- Connector command fails: confirm `cliPath`/`MCEGOLD_CLI_PATH` points to the Connector CLI and that .NET is available when using a `.dll`.
+- Connector command fails: confirm `cliPath`/`MCEGOLD_CLI_PATH` points to the mounted self-contained Linux Connector CLI executable and that the file is executable.
 - Database table errors: confirm the SQLite database was initialized by a compatible Portal version before starting the collector.
 - No publications are removed: the collector intentionally removes publications only after successful handling.
 
 ## Licensing
 
-`pyproject.toml` currently declares MIT license metadata. A `LICENSE` file has not been added in this candidate because the authoritative copyright holder/year must be confirmed before publishing.
+This project is licensed under the MIT License. See [LICENSE](LICENSE).

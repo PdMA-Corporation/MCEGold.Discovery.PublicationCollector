@@ -3,7 +3,7 @@ services:
     build: .
     environment:
       MCEGOLD_COLLECTOR_CONFIG: /app/config/collector.example.json
-      MCEGOLD_CLI_PATH: /opt/mcegold-cli/MCEGold.Data.Services.Connector.Cli.dll
+      MCEGOLD_CLI_PATH: /opt/mcegold-cli/MCEGold.Data.Services.Connector.Cli
       MCEGOLD_CONNECTOR_CONFIG_PATH: /config/connector.config.json
       MCEGOLD_DISCOVERY_DATABASE_PATH: /data/discovery_portal.db
       MCEGOLD_POLL_INTERVAL_SECONDS: "15"
@@ -17,6 +17,6 @@ services:
       - ./data:/data
       # Provide a local Connector CLI configuration file; do not commit secrets.
       - ./config:/config:ro
-      # Set MCEGOLD_CLI_HOST_PATH to a separately obtained Connector CLI directory.
+      # Set MCEGOLD_CLI_HOST_PATH to a separately obtained self-contained Linux Connector CLI directory.
       - ${MCEGOLD_CLI_HOST_PATH:-./external/mcegold-cli}:/opt/mcegold-cli:ro
     restart: unless-stopped

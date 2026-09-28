@@ -23,6 +23,7 @@ build/
 *.local.json
 config/collector.local.json
 config/connector.config.json
+config/portal.local.json
 
 # Runtime and local data
 logs/
@@ -38,6 +39,9 @@ docker/mcegold-cli/
 external/mcegold-cli/
 *.dll
 *.exe
+*.so
+*.so.*
+*.dylib
 *.pdb
 *.runtimeconfig.json
 *.deps.json
