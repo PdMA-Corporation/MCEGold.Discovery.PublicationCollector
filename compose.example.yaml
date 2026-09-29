@@ -13,7 +13,8 @@ services:
       MCEGOLD_PASSWORD: ${MCEGOLD_PASSWORD:-}
       MCEGOLD_API_KEY: ${MCEGOLD_API_KEY:-}
     volumes:
-      # Provide a Portal-created SQLite database at ./data/discovery_portal.db.
+      # Provide ./data/discovery_portal.db as the writable runtime database.
+      # For quick-start use, copy ./data/discovery.seed.db to that name first.
       - ./data:/data
       # Provide a local Connector CLI configuration file; do not commit secrets.
       - ./config:/config:ro

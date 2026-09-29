@@ -41,12 +41,14 @@ external/mcegold-cli/
 *.deps.json
 
 # SQLite/runtime data
-data/
+data/*
 *.db
 *.db-*
 *.sqlite
 *.sqlite3
 
+# Public quick-start seed database
+!data/discovery.seed.db
 # Logs
 logs/
 *.log

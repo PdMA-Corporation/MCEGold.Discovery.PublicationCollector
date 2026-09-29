@@ -38,7 +38,7 @@ Live collection requires:
 
 - Python 3.11 or newer for direct source deployment, or Docker for container deployment.
 - A self-contained Linux x64 `MCEGold.Data.Services.Connector.Cli` executable obtained separately from `MCEGold.Data.Services.Connector.Toolkit`.
-- A compatible SQLite database created and migrated by `MCEGold.Discovery.Portal`.
+- A compatible SQLite database created and migrated by `MCEGold.Discovery.Portal`, or a writable quick-start copy made from the included Portal-generated seed database.
 - MCEGold Data Services connection settings.
 - Local filesystem permissions allowing the Collector process or container to read its config files, execute the Connector CLI, and read/write the SQLite database as required by the Portal schema and Collector runtime behavior.
 
@@ -121,6 +121,28 @@ The Collector passes those values to the Connector CLI process as:
 
 The Collector does not create or migrate the Discovery database schema. It requires a SQLite database initialized and migrated by `MCEGold.Discovery.Portal`.
 
+For quick-start evaluation, the repository includes:
+
+```text
+data/discovery.seed.db
+```
+
+This is a pristine, Portal-generated, preinitialized SQLite database. Treat it as read-only reference input from the user's perspective. Before running the Collector, copy it to the normal writable runtime database name.
+
+PowerShell:
+
+```powershell
+copy data\discovery.seed.db data\discovery_portal.db
+```
+
+Linux shell:
+
+```bash
+cp data/discovery.seed.db data/discovery_portal.db
+```
+
+Use `data/discovery_portal.db` as the writable runtime copy. Normal/full deployments may continue to provide a database initialized and migrated by `MCEGold.Discovery.Portal`.
+
 The public Docker examples expect the database at:
 
 ```text
@@ -138,13 +160,14 @@ config/
   collector.local.json
   connector.config.json
 data/
+  discovery.seed.db
   discovery_portal.db
 external/
   mcegold-cli/
     MCEGold.Data.Services.Connector.Cli
 ```
 
-`config/collector.local.json`, `config/connector.config.json`, `config/portal.local.json`, `data/`, and `external/mcegold-cli/` are local deployment inputs and should remain outside Git.
+`config/collector.local.json`, `config/connector.config.json`, `config/portal.local.json`, `data/discovery_portal.db`, and `external/mcegold-cli/` are local deployment inputs and should remain outside Git. `data/discovery.seed.db` is the intentionally public quick-start seed database and should remain pristine.
 
 ## Build the Docker Image
 
@@ -206,11 +229,12 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e .
 copy config\collector.example.json config\collector.local.json
+copy data\discovery.seed.db data\discovery_portal.db
 $env:MCEGOLD_COLLECTOR_CONFIG = "config\collector.local.json"
 python -m mcegold_discovery_publication_collector
 ```
 
-For Linux shells, use the equivalent virtual-environment activation and environment-variable syntax. Direct Python deployment still requires the separately obtained Connector CLI executable and a Portal-created SQLite database.
+For Linux shells, use the equivalent virtual-environment activation, copy, and environment-variable syntax. Direct Python deployment still requires the separately obtained Connector CLI executable and a writable Discovery database at the configured path.
 
 ## Persistent Linux Service
 

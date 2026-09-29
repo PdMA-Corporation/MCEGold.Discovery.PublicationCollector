@@ -43,11 +43,20 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e .[test]
 copy config\collector.example.json config\collector.local.json
+copy data\discovery.seed.db data\discovery_portal.db
 $env:MCEGOLD_COLLECTOR_CONFIG = "config\collector.local.json"
 python -m mcegold_discovery_publication_collector
 ```
 
 Before a live run, edit `config\collector.local.json` for your local paths. Do not commit local configuration files or credentials.
+
+On Linux shells, use the equivalent copy command before starting the Collector:
+
+```bash
+cp data/discovery.seed.db data/discovery_portal.db
+```
+
+`data/discovery.seed.db` is a Portal-generated, preinitialized quick-start database included for developers who want to try the Publication Collector before running `MCEGold.Discovery.Portal`. Treat it as pristine reference input. Copy it to `data/discovery_portal.db` and let the Collector use that writable runtime copy.
 
 ## Configuration
 
@@ -114,6 +123,8 @@ PublicationCollector does not create or migrate the application database schema.
 
 The collector expects a compatible Portal-created database, currently documented by the source as schema v17 or later for runtime status support. The Portal database should be initialized before the collector runs. If the collector starts before required tables are available, it logs telemetry/control warnings and retries where supported, but it still depends on the Portal-owned schema.
 
+For quick-start use only, this repository includes `data/discovery.seed.db`, a pristine Portal-generated schema v17 database. Copy it to `data/discovery_portal.db` before running the Collector. Normal deployments may continue to use a database initialized and migrated by `MCEGold.Discovery.Portal`.
+
 SQLite schemas created inside `tests/` are test fixtures only. They are not a supported production database creation path and should not be copied into this repository as product database scripts.
 
 ## Runtime Behavior
@@ -138,7 +149,7 @@ Ensure the mounted Linux CLI file is executable on the host before starting the 
 
 Typical local use requires:
 
-- `./data/discovery_portal.db`: a compatible Portal-created SQLite database
+- `./data/discovery_portal.db`: a writable runtime database, either copied from `./data/discovery.seed.db` for quick-start use or initialized by `MCEGold.Discovery.Portal`
 - `./config/connector.config.json`: local Connector CLI config, excluded from Git
 - `MCEGOLD_CLI_HOST_PATH`: host directory containing the separately obtained self-contained Linux Connector CLI executable
 - MCEGold connection settings supplied through environment, `.env`, Docker secrets, or another local injection mechanism
