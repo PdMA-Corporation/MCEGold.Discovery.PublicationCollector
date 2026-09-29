@@ -44,7 +44,9 @@ class ConnectionSettingsReadResult:
 
 class PortalConnectionSettingsReader:
     def __init__(self, path: str | Path | None = None) -> None:
-        self.path = Path(path or os.getenv(PORTAL_LOCAL_CONFIG_PATH_ENV, DEFAULT_PORTAL_LOCAL_CONFIG_PATH))
+        env_path = os.getenv(PORTAL_LOCAL_CONFIG_PATH_ENV)
+        self.is_explicit = path is not None or bool(env_path)
+        self.path = Path(path or env_path or DEFAULT_PORTAL_LOCAL_CONFIG_PATH)
 
     def read(self) -> ConnectionSettingsReadResult:
         try:
@@ -84,6 +86,15 @@ def load_required_connection_environment(reader: PortalConnectionSettingsReader)
     if result.settings is None:
         raise ConnectionSettingsUnavailable(result.error_message or "MCEGold Data Services connection settings are incomplete.")
     return result.settings.as_environment()
+
+
+def load_optional_connection_environment(reader: PortalConnectionSettingsReader) -> dict[str, str] | None:
+    result = reader.read()
+    if result.settings is not None:
+        return result.settings.as_environment()
+    if not reader.is_explicit and result.error_message == "Portal local config file is missing.":
+        return None
+    raise ConnectionSettingsUnavailable(result.error_message or "MCEGold Data Services connection settings are incomplete.")
 
 
 def merge_connection_environment(connection_environment: dict[str, str]) -> dict[str, str]:

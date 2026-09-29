@@ -34,7 +34,7 @@ For live collection:
 
 - A separately obtained self-contained Linux `MCEGold.Data.Services.Connector.Cli` executable from `MCEGold.Data.Services.Connector.Toolkit`
 - A compatible SQLite database initialized by `MCEGold.Discovery.Portal` schema v17 or later
-- MCEGold Data Services connection settings supplied through the Portal local config or process environment
+- MCEGold Data Services connection settings in the Connector CLI configuration file or supplied through the Connector CLI's supported environment/secret mechanisms
 
 ## Local Setup
 
@@ -50,11 +50,19 @@ python -m mcegold_discovery_publication_collector
 
 Before a live run, edit `config\collector.local.json` for your local paths. Do not commit local configuration files or credentials.
 
-On Linux shells, use the equivalent copy command before starting the Collector:
+On Linux shells:
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .[test]
+cp config/collector.example.json config/collector.local.json
 cp data/discovery.seed.db data/discovery_portal.db
+export MCEGOLD_COLLECTOR_CONFIG="config/collector.local.json"
+python -m mcegold_discovery_publication_collector
 ```
+
+Python 3.11 or newer is required. On Debian/Ubuntu systems, virtual-environment support may be packaged separately; install it when needed with `sudo apt install python3-venv`.
 
 `data/discovery.seed.db` is a Portal-generated, preinitialized quick-start database included for developers who want to try the Publication Collector before running `MCEGold.Discovery.Portal`. Treat it as pristine reference input. Copy it to `data/discovery_portal.db` and let the Collector use that writable runtime copy.
 
@@ -63,7 +71,7 @@ cp data/discovery.seed.db data/discovery_portal.db
 The collector loads JSON configuration from `MCEGOLD_COLLECTOR_CONFIG` when set. `config/collector.example.json` is a safe template using Docker-oriented example paths. The public Docker examples use `/opt/mcegold-cli/MCEGold.Data.Services.Connector.Cli`, which matches the self-contained Linux Connector CLI executable distributed through `MCEGold.Data.Services.Connector.Toolkit`.
 
 - `cliPath`: path to `MCEGold.Data.Services.Connector.Cli`; may point to an executable or a `.dll`
-- `connectorConfigPath`: Connector CLI configuration file path
+- `connectorConfigPath`: Connector CLI configuration file path; this file owns MCEGold Data Services endpoint, authentication, and optional publication/request channel settings
 - `discoveryDatabasePath`: Portal-created SQLite database path
 - `pollingIntervalSeconds`, default `15`
 - `logLevel`, default `INFO`
@@ -82,19 +90,33 @@ Environment overrides:
 - `MCEGOLD_INCLUDE_RAW`
 - `MCEGOLD_PORTAL_LOCAL_CONFIG_PATH`
 
-For Portal-aligned deployments, the collector can load MCEGold Data Services connection settings from a Portal local config file containing:
+Standalone deployments should put MCEGold Data Services settings in `connector.config.json` using the Connector CLI shape:
+
+- `host`
+- `authenticationScheme`
+- `apiKey`
+- `userName`
+- `password`
+- `publication.channel`
+- `request.channel`
+
+Blank `publication.channel` and `request.channel` values are supported when the Connector environment does not require explicit channel selection. The Collector passes `connectorConfigPath` to the Connector CLI as `--config`; the Connector CLI performs its normal validation. Supported Connector CLI environment variables such as `MCEGOLD_HOST`, `MCEGOLD_USERNAME`, `MCEGOLD_PASSWORD`, and `MCEGOLD_API_KEY` may override the Connector configuration through normal subprocess inheritance.
+
+For Portal-aligned compatibility deployments, the collector can optionally load MCEGold Data Services connection settings from a Portal local config file containing:
 
 - `mcegoldDataServicesUrl`
 - `mcegoldUsername`
 - `mcegoldPassword`
 - `mcegoldApiKey`
 
-The collector passes those values to the Connector CLI as:
+The collector passes those optional Portal-derived values to the Connector CLI as:
 
 - `MCEGOLD_HOST`
 - `MCEGOLD_USERNAME`
 - `MCEGOLD_PASSWORD`
 - `MCEGOLD_API_KEY`
+
+Portal local config is optional compatibility input and is not required for standalone Collector startup.
 
 Do not commit real connector credentials, API keys, `.env` files, `connector.config.json`, `collector.local.json`, or `portal.local.json`.
 
@@ -150,9 +172,9 @@ Ensure the mounted Linux CLI file is executable on the host before starting the 
 Typical local use requires:
 
 - `./data/discovery_portal.db`: a writable runtime database, either copied from `./data/discovery.seed.db` for quick-start use or initialized by `MCEGold.Discovery.Portal`
-- `./config/connector.config.json`: local Connector CLI config, excluded from Git
+- `./config/connector.config.json`: local Connector CLI config for endpoint/authentication and optional channel selection, excluded from Git
 - `MCEGOLD_CLI_HOST_PATH`: host directory containing the separately obtained self-contained Linux Connector CLI executable
-- MCEGold connection settings supplied through environment, `.env`, Docker secrets, or another local injection mechanism
+- MCEGold connection settings supplied through `connector.config.json`, environment, `.env`, Docker secrets, or another local injection mechanism
 
 Example:
 

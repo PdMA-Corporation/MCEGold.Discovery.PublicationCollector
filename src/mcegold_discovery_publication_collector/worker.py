@@ -175,8 +175,8 @@ class PublicationCollectorWorker:
             LOGGER.warning("Could not open subscription; will retry. fault=%s", _safe_fault(exc))
             self._mark_error("Failed to open subscription session.")
             self.session_id = None
-        except ConnectionSettingsUnavailable:
-            LOGGER.info("Waiting for MCEGold Data Services connection settings.")
+        except ConnectionSettingsUnavailable as exc:
+            LOGGER.info("Waiting for MCEGold Data Services connection settings. reason=%s", exc)
             self._mark_idle()
             self.session_id = None
 

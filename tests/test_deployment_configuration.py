@@ -74,6 +74,36 @@ def test_deployment_documentation_reflects_collector_role_and_discovery_scope() 
     assert "does not need a system .NET runtime solely to execute that CLI" in deployment
 
 
+def test_documentation_describes_two_config_standalone_model_and_optional_portal_config() -> None:
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    deployment = (REPO_ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
+
+    for text in (readme, deployment):
+        assert "connector.config.json" in text
+        assert "host" in text
+        assert "authenticationScheme" in text
+        assert "publication.channel" in text
+        assert "request.channel" in text
+        assert "Blank `publication.channel` and `request.channel` values are supported" in text
+        assert "Portal local config is optional" in text
+        assert "not required for standalone Collector startup" in text
+
+
+def test_direct_python_documentation_includes_explicit_linux_sequence() -> None:
+    deployment = (REPO_ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+
+    for text in (readme, deployment):
+        assert "python3 -m venv .venv" in text
+        assert "source .venv/bin/activate" in text
+        assert "python -m pip install -e" in text
+        assert "cp config/collector.example.json config/collector.local.json" in text
+        assert "cp data/discovery.seed.db data/discovery_portal.db" in text
+        assert 'export MCEGOLD_COLLECTOR_CONFIG="config/collector.local.json"' in text
+        assert "sudo apt install python3-venv" in text
+        assert "Debian/Ubuntu" in text
+
+
 def test_quick_start_seed_database_exists_and_is_valid_sqlite() -> None:
     assert SEED_DATABASE.is_file()
 
@@ -116,6 +146,16 @@ def test_license_file_is_present_with_public_release_copyright() -> None:
 
     assert "MIT License" in license_text
     assert "Copyright (c) 2026 PdMA Corporation" in license_text
+
+
+def test_python_version_metadata_is_public_release_version() -> None:
+    pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    init = (REPO_ROOT / "src" / "mcegold_discovery_publication_collector" / "__init__.py").read_text(encoding="utf-8")
+
+    assert 'version = "1.0.0"' in pyproject
+    assert '__version__ = "1.0.0"' in init
+    assert 'version = "0.1.0"' not in pyproject
+    assert '__version__ = "0.1.0"' not in init
 
 
 def test_docker_build_context_excludes_local_configs_databases_and_binaries() -> None:

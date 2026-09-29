@@ -5,6 +5,7 @@ import subprocess
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+from mcegold_discovery_publication_collector import connection_settings
 from mcegold_discovery_publication_collector.connection_settings import (
     ConnectionSettingsUnavailable,
     PortalConnectionSettingsReader,
@@ -886,7 +887,50 @@ def test_missing_connection_settings_mark_idle_without_open_cli_call(tmp_path, c
     assert row["RuntimeState"] == "Idle"
     assert row["LastError"] is None
     assert "Waiting for MCEGold Data Services connection settings." in caplog.text
-    assert "missing" not in caplog.text
+    assert "reason=missing" in caplog.text
+
+
+def test_missing_implicit_portal_config_does_not_block_worker_startup(tmp_path, monkeypatch):
+    monkeypatch.delenv("MCEGOLD_PORTAL_LOCAL_CONFIG_PATH", raising=False)
+    monkeypatch.setattr(connection_settings, "DEFAULT_PORTAL_LOCAL_CONFIG_PATH", str(tmp_path / "missing-portal.local.json"))
+    db_path = tmp_path / "discovery_portal.db"
+    create_runtime_status_table(db_path)
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append((command, kwargs))
+        if command[1:3] == ["publication", "open-subscription"]:
+            return completed(success("publication.open-subscription", {"sessionId": "session-1"}))
+        if command[1:3] == ["publication", "read"]:
+            return completed(
+                fault(
+                    "publication.read",
+                    404,
+                    "NoPublicationAvailable",
+                    "No publication is available for the subscription session.",
+                ),
+                1,
+            )
+        return completed(success("publication.close-subscription", {"sessionId": "session-1"}))
+
+    client = PublicationClient(config(str(db_path)), runner=runner)
+    stop_event = StopAfterWait()
+    runtime_status = CollectorRuntimeStatusStore(str(db_path), instance_id="instance-1")
+    worker = PublicationCollectorWorker(
+        config(str(db_path)),
+        client=client,
+        stop_event=stop_event,
+        runtime_status=runtime_status,
+    )
+
+    worker.run()
+
+    assert [call[0][1:3] for call in calls] == [
+        ["publication", "open-subscription"],
+        ["publication", "read"],
+        ["publication", "close-subscription"],
+    ]
+    assert calls[0][1]["env"] is None
 
 
 def test_settings_saved_between_cycles_open_subscription_without_restart(tmp_path):

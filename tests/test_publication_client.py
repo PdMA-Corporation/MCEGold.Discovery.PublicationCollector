@@ -3,6 +3,7 @@ import subprocess
 
 import pytest
 
+from mcegold_discovery_publication_collector import connection_settings
 from mcegold_discovery_publication_collector.connection_settings import (
     ConnectionSettingsUnavailable,
     PortalConnectionSettingsReader,
@@ -136,6 +137,49 @@ def test_cli_success_parsing_opens_session(tmp_path):
     assert calls[0][1]["env"]["MCEGOLD_API_KEY"] == "key"
 
 
+def test_missing_implicit_portal_config_still_invokes_cli_with_connector_config(tmp_path, monkeypatch):
+    monkeypatch.delenv("MCEGOLD_PORTAL_LOCAL_CONFIG_PATH", raising=False)
+    monkeypatch.setattr(connection_settings, "DEFAULT_PORTAL_LOCAL_CONFIG_PATH", str(tmp_path / "missing-portal.local.json"))
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append((command, kwargs))
+        return completed(success("publication.open-subscription", {"sessionId": "session-1"}))
+
+    client = PublicationClient(config(), runner=runner)
+
+    assert client.open_subscription() == "session-1"
+    assert calls[0][0] == [
+        r"C:\tools\MCEGold.Data.Services.Connector.Cli.exe",
+        "publication",
+        "open-subscription",
+        "--config",
+        "config/connector.config.json",
+        "--output",
+        "json",
+    ]
+    assert calls[0][1]["env"] is None
+
+
+def test_direct_mcegold_environment_is_inherited_without_collector_preflight(tmp_path, monkeypatch):
+    monkeypatch.delenv("MCEGOLD_PORTAL_LOCAL_CONFIG_PATH", raising=False)
+    monkeypatch.setattr(connection_settings, "DEFAULT_PORTAL_LOCAL_CONFIG_PATH", str(tmp_path / "missing-portal.local.json"))
+    monkeypatch.setenv("MCEGOLD_HOST", "https://env.example.com")
+    monkeypatch.setenv("MCEGOLD_USERNAME", "env-user")
+    monkeypatch.setenv("MCEGOLD_PASSWORD", "env-password")
+    monkeypatch.setenv("MCEGOLD_API_KEY", "env-key")
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append((command, kwargs))
+        return completed(success("publication.open-subscription", {"sessionId": "session-1"}))
+
+    client = PublicationClient(config(), runner=runner)
+
+    assert client.open_subscription() == "session-1"
+    assert calls[0][1]["env"] is None
+
+
 def test_incomplete_connection_settings_skip_open_cli_call(tmp_path):
     calls = []
     connection_path = tmp_path / "portal.local.json"
@@ -146,6 +190,28 @@ def test_incomplete_connection_settings_skip_open_cli_call(tmp_path):
         client.open_subscription()
 
     assert calls == []
+
+
+def test_connector_configuration_error_surfaces_as_cli_failure_not_waiting(tmp_path, monkeypatch):
+    monkeypatch.delenv("MCEGOLD_PORTAL_LOCAL_CONFIG_PATH", raising=False)
+    monkeypatch.setattr(connection_settings, "DEFAULT_PORTAL_LOCAL_CONFIG_PATH", str(tmp_path / "missing-portal.local.json"))
+    calls = []
+
+    def runner(command, **kwargs):
+        calls.append((command, kwargs))
+        return completed(
+            fault("publication.open-subscription", 2, "InvalidConfiguration", "Configuration validation failed."),
+            2,
+        )
+
+    client = PublicationClient(config(), runner=runner)
+
+    with pytest.raises(ConnectorCliError) as exc_info:
+        client.open_subscription()
+
+    assert calls
+    assert exc_info.value.fault is not None
+    assert exc_info.value.fault.code == "InvalidConfiguration"
 
 
 def test_existing_session_uses_cached_connection_environment_until_close(tmp_path):

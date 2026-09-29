@@ -39,7 +39,7 @@ Live collection requires:
 - Python 3.11 or newer for direct source deployment, or Docker for container deployment.
 - A self-contained Linux x64 `MCEGold.Data.Services.Connector.Cli` executable obtained separately from `MCEGold.Data.Services.Connector.Toolkit`.
 - A compatible SQLite database created and migrated by `MCEGold.Discovery.Portal`, or a writable quick-start copy made from the included Portal-generated seed database.
-- MCEGold Data Services connection settings.
+- MCEGold Data Services connection settings in the Connector CLI configuration file or supplied through the Connector CLI's supported environment/secret mechanisms.
 - Local filesystem permissions allowing the Collector process or container to read its config files, execute the Connector CLI, and read/write the SQLite database as required by the Portal schema and Collector runtime behavior.
 
 The supported Linux Connector CLI package is self-contained. The Collector Docker image does not need a system .NET runtime solely to execute that CLI.
@@ -99,9 +99,37 @@ The Collector recognizes these environment overrides:
 
 Do not commit real `collector.local.json`, `connector.config.json`, `portal.local.json`, `.env` files, runtime databases, logs, or Connector CLI payloads.
 
-## MCEGold Data Services Configuration
+## Standalone Configuration Model
 
-The Connector CLI needs MCEGold Data Services connection settings. Supply them through the Connector CLI configuration file, process environment, Docker secrets, or an approved local secret-injection mechanism.
+Standalone deployments use two local configuration files with separate ownership:
+
+```text
+config/collector.local.json
+  Collector runtime paths and behavior:
+  cliPath, connectorConfigPath, discoveryDatabasePath, pollingIntervalSeconds,
+  logLevel, cliTimeoutSeconds, includeRaw
+
+config/connector.config.json
+  Connector CLI / MCEGold Data Services settings:
+  host, authenticationScheme, apiKey, userName, password,
+  publication.channel, request.channel
+```
+
+The Collector passes `connectorConfigPath` to `MCEGold.Data.Services.Connector.Cli` as `--config`. The Connector CLI owns validation of MCEGold Data Services endpoint, authentication, and optional channel settings.
+
+Blank `publication.channel` and `request.channel` values are supported when the Connector environment does not require explicit channel selection.
+
+Supported Connector CLI process environment variables can override values from `connector.config.json` through normal subprocess inheritance. This includes:
+
+- `MCEGOLD_HOST`
+- `MCEGOLD_AUTH_SCHEME`
+- `MCEGOLD_API_KEY`
+- `MCEGOLD_USERNAME`
+- `MCEGOLD_PASSWORD`
+
+Docker secrets, mounted secret files, or another approved local secret-injection mechanism may also be used according to Connector CLI support.
+
+## Optional Portal Compatibility
 
 For Portal-aligned deployments, `MCEGOLD_PORTAL_LOCAL_CONFIG_PATH` can point to a Portal local configuration file containing:
 
@@ -110,12 +138,14 @@ For Portal-aligned deployments, `MCEGOLD_PORTAL_LOCAL_CONFIG_PATH` can point to 
 - `mcegoldPassword`
 - `mcegoldApiKey`
 
-The Collector passes those values to the Connector CLI process as:
+When supplied, the Collector passes those Portal-derived values to the Connector CLI process as:
 
 - `MCEGOLD_HOST`
 - `MCEGOLD_USERNAME`
 - `MCEGOLD_PASSWORD`
 - `MCEGOLD_API_KEY`
+
+Portal local config is optional compatibility input. It is not required for standalone Collector startup.
 
 ## Discovery Database
 
@@ -222,7 +252,9 @@ docker compose -f compose.example.yaml down
 
 ## Direct Python Deployment
 
-Create a virtual environment and install the Collector from source:
+Create a virtual environment and install the Collector from source.
+
+PowerShell:
 
 ```powershell
 python -m venv .venv
@@ -234,7 +266,27 @@ $env:MCEGOLD_COLLECTOR_CONFIG = "config\collector.local.json"
 python -m mcegold_discovery_publication_collector
 ```
 
-For Linux shells, use the equivalent virtual-environment activation, copy, and environment-variable syntax. Direct Python deployment still requires the separately obtained Connector CLI executable and a writable Discovery database at the configured path.
+Linux shell:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+cp config/collector.example.json config/collector.local.json
+cp data/discovery.seed.db data/discovery_portal.db
+export MCEGOLD_COLLECTOR_CONFIG="config/collector.local.json"
+python -m mcegold_discovery_publication_collector
+```
+
+Python 3.11 or newer is required. On Debian/Ubuntu systems, virtual-environment support may be packaged separately; install it when needed with:
+
+```bash
+sudo apt install python3-venv
+```
+
+Other Linux distributions may package virtual-environment support differently.
+
+Before a live run, edit `config/collector.local.json` for local paths and provide `config/connector.config.json` for Connector CLI endpoint/authentication and optional channel settings. Direct Python deployment still requires the separately obtained Connector CLI executable and a writable Discovery database at the configured path.
 
 ## Persistent Linux Service
 

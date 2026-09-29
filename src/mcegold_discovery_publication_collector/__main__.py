@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import logging
 import signal
 import sys
@@ -15,10 +16,18 @@ from .worker import PublicationCollectorWorker
 
 
 def main(argv: list[str] | None = None) -> int:
-    argv = argv or sys.argv[1:]
-    config_path = argv[0] if argv else None
+    parser = argparse.ArgumentParser(
+        prog="mcegold-publication-collector",
+        description="Run the MCEGold Discovery Publication Collector.",
+    )
+    parser.add_argument(
+        "config_path",
+        nargs="?",
+        help="Optional Collector JSON configuration path. Defaults to MCEGOLD_COLLECTOR_CONFIG or environment overrides.",
+    )
+    args = parser.parse_args(sys.argv[1:] if argv is None else argv)
     try:
-        config = load_config(config_path)
+        config = load_config(args.config_path)
     except ConfigurationError as exc:
         configure_logging("ERROR")
         logging.getLogger(__name__).error("Configuration validation failed: %s", exc)

@@ -9,7 +9,7 @@ from typing import Any
 
 from .connection_settings import (
     PortalConnectionSettingsReader,
-    load_required_connection_environment,
+    load_optional_connection_environment,
     merge_connection_environment,
 )
 from .configuration import CollectorConfig
@@ -36,7 +36,7 @@ class DiscoveryRequestClient:
         self._session_connection_environment: dict[str, str] | None = None
 
     def open_session(self) -> str:
-        connection_environment = load_required_connection_environment(self.connection_settings_reader)
+        connection_environment = load_optional_connection_environment(self.connection_settings_reader)
         envelope = self._run(self._request_command("open-session"), connection_environment)
         session_id = _get_path(envelope, ["data", "sessionId"])
         if not session_id:
