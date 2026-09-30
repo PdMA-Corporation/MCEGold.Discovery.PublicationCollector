@@ -1,6 +1,6 @@
 # Deployment
 
-This guide describes deploying `MCEGold.Discovery.PublicationCollector` v1.0.0 as a standalone process or container. Standalone means the Collector has its own process or container; it still depends on a Portal-created Discovery database, MCEGold Data Services configuration, and a separately obtained Connector CLI.
+This guide describes deploying `MCEGold.Discovery.PublicationCollector` v1.0.0 as a standalone Python process, with Docker as an optional deployment mechanism. Standalone means the Collector has its own process; it still depends on a compatible Discovery database, MCEGold Data Services configuration, and a separately obtained Connector CLI.
 
 The Collector is a continuous publication-processing service. It opens a Connector CLI publication subscription, polls for staged `syncMeasurements` publications, persists measurements whose locations are already present in the Portal-created Discovery database, and removes each publication only after successful handling.
 
@@ -17,7 +17,7 @@ The public Collector repository provides:
 - README and deployment documentation;
 - license and tests.
 
-The Collector repository does not provide a packaged Collector runtime, Python wheel for release, bundled Connector CLI, prebuilt Docker image, or Docker registry publication. GitHub source archives are sufficient for the Collector v1.0.0 release.
+The Collector repository does not contain a bundled Connector CLI, prebuilt Docker image, Docker registry publication, credentials, or generated local runtime files. A public release package can be assembled from the source, documentation, examples, license, Python packaging metadata, and quick-start seed database while keeping the Connector CLI as a separately distributed prerequisite.
 
 The separately distributed `MCEGold.Data.Services.Connector.Toolkit` provides the supported self-contained Linux x64 Connector CLI executable. The Collector invokes that executable as a subprocess.
 
@@ -36,7 +36,7 @@ Public Collector repository
 
 Live collection requires:
 
-- Python 3.11 or newer for direct source deployment, or Docker for container deployment.
+- Python 3.11 or newer for direct source deployment. Docker is optional for container deployment.
 - A self-contained Linux x64 `MCEGold.Data.Services.Connector.Cli` executable obtained separately from `MCEGold.Data.Services.Connector.Toolkit`.
 - A compatible SQLite database created and migrated by `MCEGold.Discovery.Portal`, or a writable quick-start copy made from the included Portal-generated seed database.
 - MCEGold Data Services connection settings in the Connector CLI configuration file or supplied through the Connector CLI's supported environment/secret mechanisms.
@@ -44,15 +44,42 @@ Live collection requires:
 
 The supported Linux Connector CLI package is self-contained. The Collector Docker image does not need a system .NET runtime solely to execute that CLI.
 
+## Validated Standalone Linux Layout
+
+The validated v1.0.0 standalone Linux workflow used this repository as the Collector source and placed local runtime inputs beside it:
+
+```text
+config/
+  collector.local.json
+  connector.config.json
+data/
+  discovery.seed.db
+  discovery_portal.db
+external/
+  mcegold-cli/
+    MCEGold.Data.Services.Connector.Cli
+    configs/
+      connector.config.example.json
+    ...
+```
+
+`external/mcegold-cli/` should contain the complete separately distributed self-contained Linux x64 Connector CLI package. Keep the package files together; do not copy only `MCEGold.Data.Services.Connector.Cli`, because the self-contained distribution includes runtime/supporting files that must remain with it.
+
+The direct Python/Linux deployment path is the validated standalone path for v1.0.0. Docker remains optional.
+
 ## Connector CLI Placement
 
-The public Docker examples expect this path inside the container:
+The validated standalone Linux layout expects this executable:
+
+```text
+external/mcegold-cli/MCEGold.Data.Services.Connector.Cli
+```
+
+The public Docker examples mount the same CLI package at this path inside the container:
 
 ```text
 /opt/mcegold-cli/MCEGold.Data.Services.Connector.Cli
 ```
-
-Place the separately obtained Linux CLI executable in a host directory and mount that directory at `/opt/mcegold-cli`.
 
 On Linux hosts, confirm executable permissions before starting the Collector:
 
@@ -63,6 +90,50 @@ test -x ./external/mcegold-cli/MCEGold.Data.Services.Connector.Cli
 
 The Collector application still supports `.dll` paths for source-build or development scenarios by invoking them through `dotnet`, but `.dll` invocation is not the supported public Linux deployment path for the self-contained Toolkit package.
 
+## Connector Configuration
+
+Create the Connector CLI configuration from the example included with the separately distributed Connector package:
+
+```bash
+cp external/mcegold-cli/configs/connector.config.example.json config/connector.config.json
+```
+
+Edit `config/connector.config.json` with site-appropriate placeholder-derived values before a live run:
+
+```json
+{
+  "host": "https://your-server/connector/1.0",
+  "authenticationScheme": "BasicApi",
+  "apiKey": "",
+  "userName": "",
+  "password": "",
+  "publication": {
+    "channel": ""
+  },
+  "request": {
+    "channel": ""
+  }
+}
+```
+
+`connector.config.json` owns MCEGold Data Services connectivity:
+
+- host;
+- authentication scheme;
+- credentials;
+- optional publication channel override;
+- optional request channel override.
+
+Publication and request channel values can remain blank when the server/default behavior should determine the channel. Do not commit this file with real values.
+
+Validate the Connector configuration before starting the Collector:
+
+```bash
+external/mcegold-cli/MCEGold.Data.Services.Connector.Cli \
+  config validate \
+  --config config/connector.config.json
+```
+
 ## Collector Configuration
 
 Copy the public template to a local file:
@@ -71,13 +142,13 @@ Copy the public template to a local file:
 copy config\collector.example.json config\collector.local.json
 ```
 
-Typical Docker-oriented values:
+The distributed `config/collector.example.json` uses container-oriented paths. For the validated standalone Linux layout, copy it and update the important local paths:
 
 ```json
 {
-  "cliPath": "/opt/mcegold-cli/MCEGold.Data.Services.Connector.Cli",
-  "connectorConfigPath": "/config/connector.config.json",
-  "discoveryDatabasePath": "/data/discovery_portal.db",
+  "cliPath": "external/mcegold-cli/MCEGold.Data.Services.Connector.Cli",
+  "connectorConfigPath": "config/connector.config.json",
+  "discoveryDatabasePath": "data/discovery_portal.db",
   "pollingIntervalSeconds": 15,
   "logLevel": "INFO",
   "cliTimeoutSeconds": 60,
@@ -171,7 +242,7 @@ Linux shell:
 cp data/discovery.seed.db data/discovery_portal.db
 ```
 
-Use `data/discovery_portal.db` as the writable runtime copy. Normal/full deployments may continue to provide a database initialized and migrated by `MCEGold.Discovery.Portal`.
+Use `data/discovery_portal.db` as the writable runtime copy. Never run the Collector directly against `data/discovery.seed.db`; the seed is the pristine distributable database. Normal/full deployments may continue to provide a database initialized and migrated by `MCEGold.Discovery.Portal`.
 
 The public Docker examples expect the database at:
 
@@ -181,25 +252,73 @@ The public Docker examples expect the database at:
 
 Mount the host directory containing that database at `/data`. If required tables are unavailable, the Collector logs runtime/control warnings and retries where supported, but production schema creation remains the Portal's responsibility.
 
-## Recommended Layout
-
-One local Docker-oriented layout is:
-
-```text
-config/
-  collector.local.json
-  connector.config.json
-data/
-  discovery.seed.db
-  discovery_portal.db
-external/
-  mcegold-cli/
-    MCEGold.Data.Services.Connector.Cli
-```
-
 `config/collector.local.json`, `config/connector.config.json`, `config/portal.local.json`, `data/discovery_portal.db`, and `external/mcegold-cli/` are local deployment inputs and should remain outside Git. `data/discovery.seed.db` is the intentionally public quick-start seed database and should remain pristine.
 
-## Build the Docker Image
+## Direct Python Deployment
+
+Create a virtual environment and install the Collector from source.
+
+PowerShell:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -e .
+copy config\collector.example.json config\collector.local.json
+copy external\mcegold-cli\configs\connector.config.example.json config\connector.config.json
+copy data\discovery.seed.db data\discovery_portal.db
+$env:MCEGOLD_COLLECTOR_CONFIG = "config\collector.local.json"
+python -m mcegold_discovery_publication_collector
+```
+
+Linux shell:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e .
+cp config/collector.example.json config/collector.local.json
+cp external/mcegold-cli/configs/connector.config.example.json config/connector.config.json
+cp data/discovery.seed.db data/discovery_portal.db
+export MCEGOLD_COLLECTOR_CONFIG="config/collector.local.json"
+python -m mcegold_discovery_publication_collector
+```
+
+Python 3.11 or newer is required. On Debian/Ubuntu systems, virtual-environment support may be packaged separately; install it when needed with:
+
+```bash
+sudo apt install python3-venv
+```
+
+Other Linux distributions may package virtual-environment support differently.
+
+Before a live run:
+
+1. Edit `config/connector.config.json` with MCEGold Data Services endpoint/authentication and optional channel settings.
+2. Validate `config/connector.config.json` with the Connector CLI.
+3. Edit `config/collector.local.json` so `cliPath`, `connectorConfigPath`, and `discoveryDatabasePath` match the standalone layout.
+4. Confirm `data/discovery_portal.db` is the writable copy of `data/discovery.seed.db`, not the seed itself.
+
+## Starting And Stopping
+
+Start the Collector:
+
+```bash
+export MCEGOLD_COLLECTOR_CONFIG="config/collector.local.json"
+python -m mcegold_discovery_publication_collector
+```
+
+At `INFO` level, users should see lifecycle events such as startup, subscription open, publication processing activity, publication removal, warnings, and shutdown. Individual polling cycles are logged at `DEBUG` level. With `"pollingIntervalSeconds": 15`, the Collector continues polling even if `INFO` logs do not print a line every 15 seconds.
+
+The startup message `Automatic data retention is disabled.` means automatic deletion/retention cleanup is disabled. It does not mean publication polling is disabled.
+
+Press Ctrl+C to request graceful shutdown. The worker requests shutdown and closes the Connector CLI publication subscription where possible.
+
+## Optional Docker Deployment
+
+Docker is optional. It was not the required path for v1.0.0 direct application validation.
+
+### Build The Docker Image
 
 From the repository root:
 
@@ -209,7 +328,7 @@ docker build -t mcegold-discovery-publication-collector:1.0.0 .
 
 The Dockerfile installs the Python Collector package only. It does not bundle, download, or redistribute the Connector CLI.
 
-## Run with Docker
+### Run With Docker
 
 Example shape:
 
@@ -227,7 +346,7 @@ docker run --rm `
 
 Adapt path syntax for your host shell and operating system.
 
-## Run with Docker Compose
+### Run With Docker Compose
 
 `compose.example.yaml` is a collector-only example. It does not build or mount sibling Portal source trees, Portal-owned dashboards, internal paths, or the Connector CLI from this repository.
 
@@ -249,44 +368,6 @@ Stop the foreground Compose deployment with Ctrl+C, or from another shell:
 ```powershell
 docker compose -f compose.example.yaml down
 ```
-
-## Direct Python Deployment
-
-Create a virtual environment and install the Collector from source.
-
-PowerShell:
-
-```powershell
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -e .
-copy config\collector.example.json config\collector.local.json
-copy data\discovery.seed.db data\discovery_portal.db
-$env:MCEGOLD_COLLECTOR_CONFIG = "config\collector.local.json"
-python -m mcegold_discovery_publication_collector
-```
-
-Linux shell:
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
-cp config/collector.example.json config/collector.local.json
-cp data/discovery.seed.db data/discovery_portal.db
-export MCEGOLD_COLLECTOR_CONFIG="config/collector.local.json"
-python -m mcegold_discovery_publication_collector
-```
-
-Python 3.11 or newer is required. On Debian/Ubuntu systems, virtual-environment support may be packaged separately; install it when needed with:
-
-```bash
-sudo apt install python3-venv
-```
-
-Other Linux distributions may package virtual-environment support differently.
-
-Before a live run, edit `config/collector.local.json` for local paths and provide `config/connector.config.json` for Connector CLI endpoint/authentication and optional channel settings. Direct Python deployment still requires the separately obtained Connector CLI executable and a writable Discovery database at the configured path.
 
 ## Persistent Linux Service
 

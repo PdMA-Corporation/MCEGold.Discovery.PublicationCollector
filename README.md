@@ -1,10 +1,15 @@
 # MCEGold Discovery Publication Collector
 
-MCEGold.Discovery.PublicationCollector is a Python console collector for MCEGold measurement-data publications. It opens a consumer publication subscription through `MCEGold.Data.Services.Connector.Cli`, reads staged publication messages, parses `syncMeasurements` payloads, classifies measurement locations against the Discovery database, persists known measurements, and removes publications only after successful handling.
+MCEGold.Discovery.PublicationCollector is a Python console service for continuously consuming supported MCEGold Data Services measurement publications. It opens a consumer publication subscription through `MCEGold.Data.Services.Connector.Cli`, reads staged `syncMeasurements` messages, persists measurement data into the local Discovery SQLite database, and removes publications only after successful handling.
 
-This repository is intended to contain the collector source, tests, configuration templates, and public deployment examples. It does not include internal Git history or compiled Connector CLI output.
+Publications drive discovery. When an incoming measurement references context that is not yet known locally, the Collector uses that publication as the trigger for targeted bottom-up discovery instead of refreshing the entire source model.
 
-For deployment details, see [docs/deployment.md](docs/deployment.md).
+This repository contains the collector source, tests, configuration templates, public deployment examples, documentation, and the quick-start seed database. It does not include internal Git history, proprietary Connector internals, or compiled Connector CLI output.
+
+For deeper details, see:
+
+- [Deployment](docs/deployment.md)
+- [Publication-Driven Discovery](docs/discovery.md)
 
 ## Architecture Role
 
@@ -14,13 +19,74 @@ PublicationCollector is one component in the MCEGold Discovery architecture:
 - `MCEGold.Discovery.PublicationCollector` consumes a compatible Portal-created database.
 - `MCEGold.Data.Services.Connector.Cli` owns communication with MCEGold Data Services and ISBM-facing publication commands.
 
-PublicationCollector does not call MCEGold or ISBM HTTP endpoints directly. It invokes Connector CLI staged publication commands as a subprocess and parses the CLI JSON envelope.
+PublicationCollector does not call MCEGold or ISBM HTTP endpoints directly. It invokes Connector CLI publication and request commands as subprocesses and parses the CLI JSON envelope.
+
+The Collector can operate as a standalone process. It does not require the MCEGold Discovery Portal to be running, although the database schema remains Portal-owned and a normal Discovery deployment may use a database created and migrated by the Portal.
+
+## What It Does
+
+- Continuously consumes supported MCEGold Data Services measurement publications.
+- Parses `syncMeasurements` payloads and normalizes supported numeric measurement rows.
+- Checks whether each referenced measurement location is already present in the local Discovery database.
+- Performs on-demand bottom-up discovery when an incoming publication references unknown metadata.
+- Persists discovered contextual metadata and then persists the measurement rows when required context is available.
+- Preserves the contextual relationships needed to interpret measurement data, including measurement location, segment, site, value class, units where applicable, timestamps, names, and UUID-based traceability fields represented by the current schema.
+- Uses the MCEGold Data Services Connector CLI for all MCEGold Data Services communication.
+
+## Bottom-Up Discovery
+
+An incoming `SyncMeasurements` publication can reference a `MeasurementLocationUUID` that is not yet represented in the local Discovery database. Instead of reloading the entire source model during normal ingestion, the Collector starts with that unknown object and resolves the context needed to interpret and store the measurement.
+
+Conceptually:
+
+```text
+Incoming SyncMeasurements
+          |
+          v
+Unknown MeasurementLocation
+          |
+          v
+Resolve MeasurementLocation
+          |
+          v
+Resolve Segment if needed
+          |
+          v
+Resolve Site if needed
+          |
+          v
+Persist required contextual metadata
+          |
+          v
+Persist measurement/publication data
+```
+
+The v1.0.0 implementation uses UUID-specific Connector request commands. If a publication already includes the parent segment UUID, the Collector can use that directly. Otherwise it first resolves the triggering measurement location to find its segment. If the parent segment is not already known locally with enough site context, it resolves segment and site metadata. It then performs targeted segment-level enrichment by retrieving measurement locations for the relevant segment and persists that context before retrying the measurement-location lookup.
+
+This is targeted, incremental discovery for continuous ingestion. It is different from a scheduled full-model refresh or historical backfill engine. A complete top-down discovery can still be appropriate for initial onboarding or building a complete model; this Collector implements publication-driven bottom-up discovery for the context identified by incoming data.
+
+The efficiency benefits are conservative and practical:
+
+- avoid repeated full-model refreshes during normal ingestion;
+- reuse metadata already known locally;
+- resolve unknown metadata by persistent UUIDs;
+- limit discovery work to the relevant hierarchy and segment context;
+- reduce unnecessary request traffic and local processing;
+- allow the local Discovery model to evolve incrementally as new measurement locations, segments, or sites appear.
+
+## Semantic Context
+
+MCEGold Data Services uses MIMOSA CCOM-based messages. CCOM provides structured relationships and semantic metadata around industrial reliability information, so a measurement is more than a disconnected numeric value.
+
+The Collector preserves the contextual fields represented by its current parser and SQLite schema, including measurement UUIDs, measurement location UUIDs, segment and site relationships discovered through the local model, timestamps, value class, human-readable names, engineering unit/unit-of-measure metadata where applicable, and UUID relationships used for traceability.
+
+This context is useful for downstream analytics, digital twins, feature engineering, AI/ML ingestion, and machine interpretation because consumers can determine what was measured, where it belongs, when it was measured, and how the value should be interpreted. The repository does not claim that every possible CCOM field is persisted or that the output requires no further curation for downstream modeling.
 
 ## Current Public-Release Status
 
 This public-release candidate intentionally does not bundle `MCEGold.Data.Services.Connector.Cli` binaries. The Connector CLI is a required runtime dependency and is distributed separately through `MCEGold.Data.Services.Connector.Toolkit`.
 
-The Collector v1.0.0 release is source-oriented. It provides this repository, Dockerfile, Compose example, configuration examples, documentation, license, and tests. GitHub source archives are sufficient for the Collector release; no separate Collector runtime package, wheel, bundled Connector CLI, or prebuilt Docker image is produced by this repository.
+The Collector v1.0.0 release is source-oriented. It provides this repository, Dockerfile, Compose example, configuration examples, documentation, license, tests, and seed database. The repository does not contain a bundled Connector CLI, a prebuilt Docker image, or generated local runtime files.
 
 ## Prerequisites
 
@@ -43,12 +109,13 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -e .[test]
 copy config\collector.example.json config\collector.local.json
+copy external\mcegold-cli\configs\connector.config.example.json config\connector.config.json
 copy data\discovery.seed.db data\discovery_portal.db
 $env:MCEGOLD_COLLECTOR_CONFIG = "config\collector.local.json"
 python -m mcegold_discovery_publication_collector
 ```
 
-Before a live run, edit `config\collector.local.json` for your local paths. Do not commit local configuration files or credentials.
+Before a live run, edit `config\collector.local.json` for your local paths and edit `config\connector.config.json` for MCEGold Data Services connectivity. Do not commit local configuration files or credentials.
 
 On Linux shells:
 
@@ -57,6 +124,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -e .[test]
 cp config/collector.example.json config/collector.local.json
+cp external/mcegold-cli/configs/connector.config.example.json config/connector.config.json
 cp data/discovery.seed.db data/discovery_portal.db
 export MCEGOLD_COLLECTOR_CONFIG="config/collector.local.json"
 python -m mcegold_discovery_publication_collector
@@ -158,6 +226,8 @@ Unknown measurement locations trigger automatic, on-demand bottom-up discovery d
 The collector also writes heartbeat/runtime status to `CollectorRuntimeStatus`, reads control settings from `ApplicationSetting`, and can run measurement retention cleanup based on Portal-owned settings.
 
 ## Docker
+
+Docker is optional. The direct Python/Linux workflow in [Deployment](docs/deployment.md) is the validated standalone path for v1.0.0.
 
 The Dockerfile installs the Python package and prepares expected directories under `/app`, `/config`, `/data`, and `/opt/mcegold-cli`.
 

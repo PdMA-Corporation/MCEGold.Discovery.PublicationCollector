@@ -64,11 +64,15 @@ def test_public_collector_example_uses_self_contained_linux_cli_path() -> None:
 
 def test_deployment_documentation_reflects_collector_role_and_discovery_scope() -> None:
     deployment = (REPO_ROOT / "docs" / "deployment.md").read_text(encoding="utf-8")
+    discovery = (REPO_ROOT / "docs" / "discovery.md").read_text(encoding="utf-8")
 
     assert "continuous publication-processing service" in deployment
     assert "bottom-up discovery automatically and on demand during publication processing" in deployment
     assert "triggering measurement location, its segment, associated site information" in deployment
     assert "does not implement a separate inventory-wide discovery or historical replay workflow" in deployment
+    assert "Publications drive discovery." in discovery
+    assert "retrieves measurement-location metadata for the relevant segment" in discovery
+    assert "does not describe a separate scheduled full-discovery or historical backfill workflow" in discovery
     assert "/opt/mcegold-cli/MCEGold.Data.Services.Connector.Cli" in deployment
     assert "/opt/mcegold-cli/MCEGold.Data.Services.Connector.Cli.dll" not in deployment
     assert "does not need a system .NET runtime solely to execute that CLI" in deployment
@@ -102,6 +106,29 @@ def test_direct_python_documentation_includes_explicit_linux_sequence() -> None:
         assert 'export MCEGOLD_COLLECTOR_CONFIG="config/collector.local.json"' in text
         assert "sudo apt install python3-venv" in text
         assert "Debian/Ubuntu" in text
+    assert "cp external/mcegold-cli/configs/connector.config.example.json config/connector.config.json" in deployment
+    assert "external/mcegold-cli/MCEGold.Data.Services.Connector.Cli" in deployment
+    assert "config validate" in deployment
+    assert "Never run the Collector directly against `data/discovery.seed.db`" in deployment
+    assert "Individual polling cycles are logged at `DEBUG` level" in deployment
+    assert "does not mean publication polling is disabled" in deployment
+
+
+def test_readme_links_discovery_document_and_uses_bounded_ai_language() -> None:
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    discovery = (REPO_ROOT / "docs" / "discovery.md").read_text(encoding="utf-8")
+
+    assert "[Publication-Driven Discovery](docs/discovery.md)" in readme
+    assert "well suited to analytics, digital twins, feature engineering, AI/ML ingestion" in discovery
+    for forbidden in (
+        "AI-ready data",
+        "ready for AI training",
+        "the best data model",
+        "the most comprehensive industrial data model",
+        "all data is fully tagged for AI",
+    ):
+        assert forbidden not in readme
+        assert forbidden not in discovery
 
 
 def test_quick_start_seed_database_exists_and_is_valid_sqlite() -> None:
