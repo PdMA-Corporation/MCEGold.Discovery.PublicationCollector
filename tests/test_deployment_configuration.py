@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -60,6 +61,7 @@ def test_public_collector_example_uses_self_contained_linux_cli_path() -> None:
     example = (REPO_ROOT / "config" / "collector.example.json").read_text(encoding="utf-8")
 
     assert '"/opt/mcegold-cli/MCEGold.Data.Services.Connector.Cli"' in example
+    assert json.loads(example)["useSharedRequestSession"] is False
 
 
 def test_deployment_documentation_reflects_collector_role_and_discovery_scope() -> None:

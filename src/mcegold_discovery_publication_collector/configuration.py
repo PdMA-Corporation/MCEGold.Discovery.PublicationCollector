@@ -25,8 +25,11 @@ class CollectorConfig:
     log_level: str = DEFAULT_LOG_LEVEL
     cli_timeout_seconds: float = DEFAULT_CLI_TIMEOUT_SECONDS
     include_raw: bool = False
+    use_shared_request_session: bool = False
 
     def validate(self) -> None:
+        if not isinstance(self.use_shared_request_session, bool):
+            raise ConfigurationError("useSharedRequestSession must be a Boolean.")
         missing = []
         if not self.cli_path:
             missing.append("cliPath or MCEGOLD_CLI_PATH")
@@ -70,9 +73,22 @@ def load_config(path: str | None = None, env: dict[str, str] | None = None) -> C
             "cliTimeoutSeconds",
         ),
         include_raw=_bool(_override(values, "includeRaw", effective_env, "MCEGOLD_INCLUDE_RAW", False)),
+        use_shared_request_session=_shared_request_session_bool(values, effective_env),
     )
     config.validate()
     return config
+
+
+def _shared_request_session_bool(values: dict[str, Any], env: dict[str, str]) -> bool:
+    override = env.get("MCEGOLD_USE_SHARED_REQUEST_SESSION")
+    if override not in (None, ""):
+        if isinstance(override, str) and override.strip().casefold() in {"true", "false"}:
+            return override.strip().casefold() == "true"
+        raise ConfigurationError("MCEGOLD_USE_SHARED_REQUEST_SESSION must be true or false.")
+    value = values.get("useSharedRequestSession", False)
+    if not isinstance(value, bool):
+        raise ConfigurationError("useSharedRequestSession must be a JSON Boolean.")
+    return value
 
 
 def _read_json(path: str | None) -> dict[str, Any]:

@@ -35,14 +35,24 @@ class DiscoveryRequestClient:
         self.connection_settings_reader = connection_settings_reader or PortalConnectionSettingsReader()
         self._session_connection_environment: dict[str, str] | None = None
 
+    def prepare_connection(self) -> None:
+        self.clear_connection()
+        self._session_connection_environment = load_optional_connection_environment(self.connection_settings_reader)
+
+    def clear_connection(self) -> None:
+        self._session_connection_environment = None
+
     def open_session(self) -> str:
-        connection_environment = load_optional_connection_environment(self.connection_settings_reader)
-        envelope = self._run(self._request_command("open-session"), connection_environment)
-        session_id = _get_path(envelope, ["data", "sessionId"])
-        if not session_id:
-            raise DiscoveryRequestError("Connector CLI opened a request session without returning data.sessionId.")
-        self._session_connection_environment = connection_environment
-        return str(session_id)
+        try:
+            self.prepare_connection()
+            envelope = self._run(self._request_command("open-session"))
+            session_id = _get_path(envelope, ["data", "sessionId"])
+            if not session_id:
+                raise DiscoveryRequestError("Connector CLI opened a request session without returning data.sessionId.")
+            return str(session_id)
+        except Exception:
+            self.clear_connection()
+            raise
 
     def post_request(self, session_id: str, request: dict[str, Any]) -> str:
         with tempfile.NamedTemporaryFile("w", encoding="utf-8", suffix=".json", delete=False) as file:
@@ -70,14 +80,21 @@ class DiscoveryRequestClient:
         try:
             self._run(self._request_command("close-session", session_id))
         finally:
-            self._session_connection_environment = None
+            self.clear_connection()
 
     def execute_request(self, session_id: str, request: dict[str, Any]) -> Any:
         request_message_id = self.post_request(session_id, request)
         try:
-            return self.read_response(session_id, request_message_id)
-        finally:
+            payload = self.read_response(session_id, request_message_id)
+        except Exception:
+            try:
+                self.remove_response(session_id, request_message_id)
+            except Exception:
+                LOGGER.warning("Response removal failed after a request read failure.")
+            raise
+        else:
             self.remove_response(session_id, request_message_id)
+            return payload
 
     def _request_command(self, verb: str, session_id: str | None = None) -> list[str]:
         command = self._base_command()

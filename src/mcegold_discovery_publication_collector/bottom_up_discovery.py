@@ -8,6 +8,7 @@ from .discovery_models import MeasurementLocationMetadata, SegmentMetadata, Segm
 from .discovery_persistence import DiscoveryPersistenceError, SQLiteDiscoveryPersistence
 from .discovery_request_client import DiscoveryRequestClient, DiscoveryRequestError
 from .discovery_response_parser import DiscoveryResponseParseError, DiscoveryResponseParser
+from .request_session_settings import PortalRequestSessionReader
 
 
 LOGGER = logging.getLogger(__name__)
@@ -20,11 +21,28 @@ class DiscoveryRequestSession(Protocol):
 
 
 class DiscoverySessionClient(DiscoveryRequestSession, Protocol):
+    def prepare_connection(self) -> None:
+        ...
+
+    def clear_connection(self) -> None:
+        ...
+
     def open_session(self) -> str:
         ...
 
     def close_session(self, session_id: str) -> None:
         ...
+
+
+class SharedRequestSessionReader(Protocol):
+    def read(self) -> str | None:
+        ...
+
+
+@dataclass(frozen=True)
+class RequestSessionLease:
+    session_id: str
+    owned: bool
 
 
 class DiscoveryPersistence(Protocol):
@@ -62,20 +80,32 @@ class BottomUpDiscoveryService:
         request_client: DiscoverySessionClient,
         persistence: DiscoveryPersistence,
         parser: DiscoveryResponseParser | None = None,
+        *,
+        use_shared_request_session: bool = False,
+        shared_session_reader: SharedRequestSessionReader | None = None,
     ) -> None:
         self.request_client = request_client
         self.persistence = persistence
         self.parser = parser or DiscoveryResponseParser()
+        self.use_shared_request_session = use_shared_request_session
+        self.shared_session_reader = shared_session_reader
 
     def discover_measurement_location(
         self,
         measurement_location_uuid: str,
         segment_uuid_if_known: str | None = None,
     ) -> BottomUpDiscoveryResult:
-        session_id: str | None = None
+        lease: RequestSessionLease | None = None
         try:
-            session_id = self.request_client.open_session()
-            return self._discover_in_session(measurement_location_uuid, segment_uuid_if_known, session_id)
+            if self.use_shared_request_session:
+                session_id = self.shared_session_reader.read() if self.shared_session_reader is not None else None
+                if not session_id:
+                    raise BottomUpDiscoveryError("Portal request session is unavailable; discovery deferred.")
+                lease = RequestSessionLease(session_id, owned=False)
+                self.request_client.prepare_connection()
+            else:
+                lease = RequestSessionLease(self.request_client.open_session(), owned=True)
+            return self._discover_in_session(measurement_location_uuid, segment_uuid_if_known, lease.session_id)
         except BottomUpDiscoveryError:
             raise
         except (DiscoveryRequestError, DiscoveryResponseParseError, DiscoveryPersistenceError) as exc:
@@ -83,11 +113,14 @@ class BottomUpDiscoveryService:
         except Exception as exc:
             raise BottomUpDiscoveryError("Bottom-up discovery failed.") from exc
         finally:
-            if session_id is not None:
-                try:
-                    self.request_client.close_session(session_id)
-                except Exception as exc:
-                    LOGGER.warning("Request session close failed during discovery cleanup: %s", exc)
+            try:
+                if lease is not None and lease.owned:
+                    try:
+                        self.request_client.close_session(lease.session_id)
+                    except Exception as exc:
+                        LOGGER.warning("Request session close failed during discovery cleanup: %s", exc)
+            finally:
+                self.request_client.clear_connection()
 
     def _discover_in_session(
         self,
@@ -210,6 +243,10 @@ def build_bottom_up_discovery_service(config) -> BottomUpDiscoveryService:
     return BottomUpDiscoveryService(
         request_client=DiscoveryRequestClient(config),
         persistence=SQLiteDiscoveryPersistence(config.discovery_database_path),
+        use_shared_request_session=config.use_shared_request_session,
+        shared_session_reader=(
+            PortalRequestSessionReader(config.discovery_database_path) if config.use_shared_request_session else None
+        ),
     )
 
 
