@@ -52,7 +52,7 @@ function Copy-RequiredTree {
         if ($_.Name -like "*.pyc") {
             return
         }
-        $relativeChild = [System.IO.Path]::GetRelativePath($SourceRoot, $_.FullName)
+        $relativeChild = $_.FullName.Substring($SourceRoot.TrimEnd('\', '/').Length + 1)
         $relativePackagePath = Join-Path $RelativeRoot $relativeChild
         Copy-RequiredFile -Source $_.FullName -DestinationRoot $DestinationRoot -RelativePath $relativePackagePath
     }
@@ -74,12 +74,16 @@ try {
     Assert-FileExists $seedPath
 
     $pyprojectText = Get-Content -LiteralPath $pyprojectPath -Raw
-    if ($pyprojectText -notmatch "(?m)^version\s*=\s*`"$([regex]::Escape($Version))`"$") {
+    $versionPattern = '(?m)^version\s*=\s*"' + [regex]::Escape($Version) + '"'
+
+    if ($pyprojectText -notmatch $versionPattern) {
         throw "pyproject.toml version is not $Version."
     }
 
     $initText = Get-Content -LiteralPath $initPath -Raw
-    if ($initText -notmatch "__version__\s*=\s*`"$([regex]::Escape($Version))`"") {
+    $runtimeVersionPattern = '__version__\s*=\s*"' + [regex]::Escape($Version) + '"'
+
+    if ($initText -notmatch $runtimeVersionPattern) {
         throw "Runtime __version__ is not $Version."
     }
 
