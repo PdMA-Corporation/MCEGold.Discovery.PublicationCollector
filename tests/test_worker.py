@@ -5,6 +5,8 @@ import subprocess
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+import pytest
+
 from mcegold_discovery_publication_collector import connection_settings
 from mcegold_discovery_publication_collector.connection_settings import (
     ConnectionSettingsUnavailable,
@@ -32,6 +34,11 @@ from mcegold_discovery_publication_collector.publication_client import (
 from mcegold_discovery_publication_collector.publication_processor import PublicationProcessor
 from mcegold_discovery_publication_collector.runtime_status import CollectorRuntimeStatusStore, RuntimeStatusError
 from mcegold_discovery_publication_collector.worker import PublicationCollectorWorker
+from mcegold_discovery_publication_collector.bottom_up_discovery import BottomUpDiscoveryService
+from mcegold_discovery_publication_collector.discovery_models import LocalSegment
+from mcegold_discovery_publication_collector.discovery_request_client import DiscoveryRequestClient
+from mcegold_discovery_publication_collector.discovery_trigger import BottomUpDiscoveryTrigger
+from mcegold_discovery_publication_collector.request_session_settings import PortalRequestSessionReader
 
 
 def config(discovery_database_path="discovery.db"):
@@ -365,6 +372,91 @@ def processor(is_known=True, lookup_error=None, trigger=None, persistence=None):
         trigger or FakeTrigger(),
         persistence or FakePersistence(),
     )
+
+
+@pytest.mark.parametrize("failure", ["missing", "database", "closed", "timeout", "known"])
+def test_shared_discovery_retains_publication_until_later_poll(tmp_path, monkeypatch, failure):
+    monkeypatch.delenv("MCEGOLD_PORTAL_LOCAL_CONFIG_PATH", raising=False)
+    monkeypatch.setattr(connection_settings, "DEFAULT_PORTAL_LOCAL_CONFIG_PATH", str(tmp_path / "no-config.json"))
+    path = tmp_path / "portal.db"
+    if failure != "database":
+        create_application_setting_table(path)
+        if failure in {"closed", "timeout"}:
+            set_application_setting(path, "Discovery.RequestSessionId", "portal-A", "String")
+
+    class DiscoveryStorage:
+        known = failure == "known"
+
+        def lookup(self, location_uuid):
+            return MeasurementLocationLookupResult(is_known=self.known)
+
+        def get_segment(self, segment_uuid):
+            return LocalSegment(segment_uuid, "site-1", 1)
+
+        def persist_targeted_discovery(self, **kwargs):
+            self.known = True
+            return len(kwargs["measurement_locations"])
+
+    requests = []
+
+    def runner(command, **kwargs):
+        requests.append(command)
+        verb = command[2]
+        assert verb not in {"open-session", "close-session"}
+        session_id = command[command.index("--session-id") + 1]
+        if session_id == "portal-A":
+            if failure == "timeout":
+                raise subprocess.TimeoutExpired(command, 1)
+            return completed(fault("request.post", 410, "SessionClosed"), 1)
+        assert session_id == "portal-B"
+        if verb == "post":
+            return completed(success("request.post", {"requestMessageId": "collector-request"}))
+        assert command[command.index("--request-id") + 1] == "collector-request"
+        payload = {"showMeasurementLocations": {"dataArea": {"measurementLocations": [{
+            "segment": {"UUID": "segment-1"},
+            "measurementLocation": [{"UUID": "location-1", "shortNames": [{"text": "Location"}],
+                                     "valueClass": "Number"}],
+        }]}}}
+        return completed(success(f"request.{verb}", {"payload": payload}))
+
+    storage = DiscoveryStorage()
+    request_client = DiscoveryRequestClient(config(str(path)), runner=runner)
+    service = BottomUpDiscoveryService(
+        request_client, storage, use_shared_request_session=True,
+        shared_session_reader=PortalRequestSessionReader(str(path)),
+    )
+    persistence = FakePersistence()
+    handler = PublicationProcessor(
+        MeasurementPublicationParser(), storage, BottomUpDiscoveryTrigger(service), persistence,
+    )
+    client = FakeClient()
+    message = publication(segment_uuid="segment-1")
+    client.read_results.append(message)
+    worker = PublicationCollectorWorker(config(str(path)), client=client, handler=handler)
+
+    if failure == "known":
+        assert worker.poll_once() is True
+        assert requests == []
+    else:
+        assert worker.poll_once() is False
+        assert ("remove", "session-1") not in client.calls
+        assert persistence.rows == []
+        assert len(requests) == (1 if failure in {"closed", "timeout"} else 0)
+        assert request_client._session_connection_environment is None
+        if failure == "database":
+            assert not path.exists()
+            create_application_setting_table(path)
+        set_application_setting(path, "Discovery.RequestSessionId", "portal-B", "String")
+        client.read_results.append(message)
+        assert worker.poll_once() is True
+        assert [command[2] for command in requests[-3:]] == ["post", "read-response", "remove-response"]
+
+    assert len(persistence.rows) == 1
+    assert client.calls.count(("open",)) == 1
+    assert client.calls.count(("remove", "session-1")) == 1
+    assert request_client._session_connection_environment is None
+    worker.shutdown()
+    assert client.calls[-1] == ("close", "session-1")
 
 
 def test_open_session_state_is_retained_between_polls():

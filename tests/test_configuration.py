@@ -2,7 +2,7 @@ import json
 
 import pytest
 
-from mcegold_discovery_publication_collector.configuration import ConfigurationError, load_config
+from mcegold_discovery_publication_collector.configuration import CollectorConfig, ConfigurationError, load_config
 
 
 def test_default_polling_interval_is_15_seconds(tmp_path):
@@ -21,6 +21,7 @@ def test_default_polling_interval_is_15_seconds(tmp_path):
     config = load_config(str(config_path), env={})
 
     assert config.polling_interval_seconds == 15
+    assert config.use_shared_request_session is False
 
 
 def test_environment_overrides_file_values(tmp_path):
@@ -65,3 +66,50 @@ def test_environment_overrides_file_values(tmp_path):
 def test_missing_required_configuration_fails():
     with pytest.raises(ConfigurationError):
         load_config(env={})
+
+
+def shared_config(tmp_path, value, env=None):
+    path = tmp_path / "collector.json"
+    path.write_text(json.dumps({
+        "cliPath": "cli", "connectorConfigPath": "connector.json", "discoveryDatabasePath": "db",
+        "useSharedRequestSession": value,
+    }), encoding="utf-8")
+    return load_config(str(path), env=env or {"MCEGOLD_LOG_LEVEL": "INFO"})
+
+
+@pytest.mark.parametrize("value", [True, False])
+def test_shared_session_json_boolean(tmp_path, value):
+    assert shared_config(tmp_path, value).use_shared_request_session is value
+
+
+@pytest.mark.parametrize("value", ["true", "false", 0, 1, None, [], {}])
+def test_shared_session_rejects_non_boolean_json(tmp_path, value):
+    with pytest.raises(ConfigurationError, match="JSON Boolean"):
+        shared_config(tmp_path, value)
+
+
+@pytest.mark.parametrize("text, expected", [("true", True), ("TrUe", True), (" FALSE ", False)])
+def test_shared_session_environment_overrides_json(tmp_path, text, expected):
+    assert shared_config(tmp_path, not expected, {
+        "MCEGOLD_USE_SHARED_REQUEST_SESSION": text,
+    }).use_shared_request_session is expected
+
+
+@pytest.mark.parametrize("text", ["1", "0", "yes", "on", "null", " ", "invalid"])
+def test_shared_session_rejects_invalid_environment(tmp_path, text):
+    with pytest.raises(ConfigurationError, match="must be true or false"):
+        shared_config(tmp_path, False, {"MCEGOLD_USE_SHARED_REQUEST_SESSION": text})
+
+
+def test_empty_shared_session_environment_uses_json(tmp_path):
+    assert shared_config(tmp_path, True, {"MCEGOLD_USE_SHARED_REQUEST_SESSION": ""}).use_shared_request_session
+
+
+def test_shared_session_environment_has_precedence_over_invalid_json(tmp_path):
+    assert shared_config(tmp_path, "invalid", {"MCEGOLD_USE_SHARED_REQUEST_SESSION": "true"}).use_shared_request_session
+
+
+@pytest.mark.parametrize("value", [1, "false", None])
+def test_direct_config_rejects_non_boolean_shared_session(value):
+    with pytest.raises(ConfigurationError, match="must be a Boolean"):
+        CollectorConfig("cli", "connector.json", "db", use_shared_request_session=value).validate()

@@ -5,7 +5,12 @@ import pytest
 from mcegold_discovery_publication_collector.bottom_up_discovery import (
     BottomUpDiscoveryError,
     BottomUpDiscoveryService,
+    build_bottom_up_discovery_service,
 )
+from mcegold_discovery_publication_collector.configuration import CollectorConfig
+from mcegold_discovery_publication_collector.connection_settings import ConnectionSettingsUnavailable
+from mcegold_discovery_publication_collector.publication_client import CliFault, ConnectorCliError
+from mcegold_discovery_publication_collector.request_session_settings import PortalRequestSessionReader
 from mcegold_discovery_publication_collector.discovery_models import LocalSegment
 from mcegold_discovery_publication_collector.discovery_persistence import (
     DiscoveryPersistenceError,
@@ -21,6 +26,14 @@ class FakeRequestClient:
         self.requests = []
         self.opened = 0
         self.closed = []
+        self.prepared = 0
+        self.cleared = 0
+
+    def prepare_connection(self):
+        self.prepared += 1
+
+    def clear_connection(self):
+        self.cleared += 1
 
     def open_session(self):
         self.opened += 1
@@ -57,6 +70,136 @@ class FakePersistence:
             raise self.error
         self.persisted.append(kwargs)
         return len(kwargs["measurement_locations"])
+
+
+class FakeSessionReader:
+    def __init__(self, session_id="portal-A"):
+        self.session_id = session_id
+        self.calls = 0
+
+    def read(self):
+        self.calls += 1
+        return self.session_id
+
+
+def shared_service(client=None, persistence=None, reader=None):
+    client = client or FakeRequestClient(responses={
+        ("GetMeasurementLocations", (("segmentUuid", "segment-1"),)):
+            measurement_locations_response("segment-1", ["location-1"]),
+    })
+    persistence = persistence or FakePersistence(segment=LocalSegment("segment-1", "site-1", 1))
+    reader = reader or FakeSessionReader()
+    return BottomUpDiscoveryService(
+        client, persistence, use_shared_request_session=True, shared_session_reader=reader,
+    )
+
+
+def test_shared_session_replacement_is_read_between_workflows():
+    reader = FakeSessionReader()
+    service = shared_service(reader=reader)
+    for session_id in ["portal-A", "portal-B", "portal-B"]:
+        reader.session_id = session_id
+        service.discover_measurement_location("location-1", "segment-1")
+    assert [session for session, _ in service.request_client.requests] == ["portal-A", "portal-B", "portal-B"]
+    assert reader.calls == 3
+    assert service.request_client.opened == 0
+    assert service.request_client.closed == []
+    assert service.request_client.prepared == 3
+    assert service.request_client.cleared == 3
+
+
+def test_shared_workflow_keeps_acquired_id_across_multiple_requests():
+    reader = FakeSessionReader()
+    client = FakeRequestClient(responses={
+        ("GetMeasurementLocations", (("measurementLocationUuid", "location-1"),)):
+            measurement_locations_response("segment-1", ["location-1"]),
+        ("GetMeasurementLocations", (("segmentUuid", "segment-1"),)):
+            measurement_locations_response("segment-1", ["location-1"]),
+    })
+    execute = client.execute_request
+
+    def replacing_execute(session_id, request):
+        reader.session_id = "portal-B"
+        return execute(session_id, request)
+
+    client.execute_request = replacing_execute
+    shared_service(client=client, reader=reader).discover_measurement_location("location-1")
+    assert [session for session, _ in client.requests] == ["portal-A", "portal-A"]
+    assert reader.calls == 1
+    assert client.closed == []
+
+
+@pytest.mark.parametrize("failure", ["missing", "database", "prepare", "request", "parse", "persistence"])
+def test_shared_failures_never_open_or_close_session(tmp_path, failure):
+    service = shared_service()
+    if failure == "missing":
+        service.shared_session_reader = FakeSessionReader(None)
+    elif failure == "database":
+        service.shared_session_reader = PortalRequestSessionReader(str(tmp_path / "missing.db"))
+    elif failure == "prepare":
+        def fail_prepare():
+            raise ConnectionSettingsUnavailable("settings incomplete")
+        service.request_client.prepare_connection = fail_prepare
+    elif failure == "request":
+        service.request_client.fail_on_request_type = "GetMeasurementLocations"
+    elif failure == "parse":
+        service.request_client.responses = {
+            ("GetMeasurementLocations", (("segmentUuid", "segment-1"),)): "invalid payload",
+        }
+    else:
+        service.persistence.error = DiscoveryPersistenceError("write failed")
+    with pytest.raises(BottomUpDiscoveryError):
+        service.discover_measurement_location("location-1", "segment-1")
+    assert service.request_client.opened == 0
+    assert service.request_client.closed == []
+    assert service.request_client.cleared == 1
+    if failure in {"missing", "database", "prepare"}:
+        assert service.request_client.requests == []
+
+
+@pytest.mark.parametrize("code", ["SessionClosed", "SessionExpired", "Unauthorized", "InvalidConfiguration"])
+def test_shared_remote_failures_do_not_reread_or_retry(code):
+    reader = FakeSessionReader()
+    service = shared_service(reader=reader)
+    calls = []
+
+    def fail(session_id, request):
+        calls.append((session_id, request))
+        reader.session_id = "portal-B"
+        raise ConnectorCliError("remote failure", [], fault=CliFault("remote", code, "failed", 403))
+
+    service.request_client.execute_request = fail
+    with pytest.raises(BottomUpDiscoveryError) as error:
+        service.discover_measurement_location("location-1", "segment-1")
+    assert isinstance(error.value.__cause__, ConnectorCliError)
+    assert len(calls) == 1
+    assert reader.calls == 1
+    assert service.request_client.opened == 0
+    assert service.request_client.closed == []
+
+
+def test_standalone_ignores_shared_reader_and_clears_state():
+    reader = FakeSessionReader()
+    service = shared_service(reader=reader)
+    service.use_shared_request_session = False
+    service.discover_measurement_location("location-1", "segment-1")
+    assert reader.calls == 0
+    assert service.request_client.opened == 1
+    assert service.request_client.closed == ["request-session-1"]
+    assert service.request_client.cleared == 1
+
+
+@pytest.mark.parametrize("shared", [True, False])
+def test_service_builder_wires_session_configuration(shared):
+    service = build_bottom_up_discovery_service(CollectorConfig(
+        "cli", "connector.json", "portal.db", use_shared_request_session=shared,
+    ))
+    assert service.use_shared_request_session is shared
+    if shared:
+        assert isinstance(service.shared_session_reader, PortalRequestSessionReader)
+        assert service.shared_session_reader.database_path == "portal.db"
+    else:
+        assert service.shared_session_reader is None
 
 
 def test_segment_uuid_fast_path_with_known_segment_only_fetches_segment_locations():
