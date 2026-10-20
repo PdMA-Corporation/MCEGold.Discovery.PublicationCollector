@@ -8,7 +8,7 @@ Publications drive discovery.
 
 The Collector continuously reads supported MCEGold Data Services `syncMeasurements` publications. Those publications identify the measurement locations being reported. When a measurement location is already known in the local Discovery SQLite database, the Collector can persist the measurement rows directly. When it is not known, the publication becomes the trigger for targeted bottom-up discovery.
 
-This document describes the v1.0.0 implementation. It does not describe a separate scheduled full-discovery or historical backfill workflow, because this repository does not implement one.
+This document describes the v1.0.1 implementation. It does not describe a separate scheduled full-discovery or historical backfill workflow, because this repository does not implement one.
 
 ## Why Bottom-Up Discovery
 
@@ -48,7 +48,7 @@ The principle is:
 
 This is especially useful for ongoing publication ingestion because the publication stream points to the additional context that is needed. It avoids repeatedly refreshing the complete source model when only a narrow part of the hierarchy is needed to process new measurements.
 
-Bottom-up discovery is not a universal replacement for top-down discovery. A complete top-down discovery can be appropriate for initial onboarding, complete model review, or building a full local model. The v1.0.0 Publication Collector implements publication-driven bottom-up discovery for continuous ingestion.
+Bottom-up discovery is not a universal replacement for top-down discovery. A complete top-down discovery can be appropriate for initial onboarding, complete model review, or building a full local model. The v1.0.1 Publication Collector implements publication-driven bottom-up discovery for continuous ingestion.
 
 ## Implemented Flow
 
@@ -56,7 +56,7 @@ The Collector parses each `syncMeasurements` publication into normalized measure
 
 If the measurement location is unknown, the Collector:
 
-1. Opens a Connector CLI request session.
+1. Uses a Portal-managed Consumer Request Session when `useSharedRequestSession` is `true`; otherwise opens its own Consumer Request Session (the default).
 2. Determines the parent segment:
    - if the publication measurement row includes a segment UUID, the Collector uses it;
    - otherwise it requests `GetMeasurementLocations` filtered by the triggering measurement location UUID and reads the segment UUID from the returned metadata.
@@ -67,6 +67,8 @@ If the measurement location is unknown, the Collector:
 7. Persists the discovered site, segment, measurement-location, type, unit, unit-of-measure quantity, and information-source metadata represented by the current schema.
 8. Re-checks the triggering measurement location locally.
 9. Persists the original measurement rows only after required context is present.
+
+The Collector closes only Request Sessions it opens itself. Shared mode reads the Portal-managed Session ID from the same live SQLite database used by the Portal and leaves session ownership with the Portal. If the shared session is unavailable, discovery is deferred without opening a replacement session. See [Shared Request Session](../README.md#shared-request-session) for configuration and retry behavior.
 
 The segment-level enrichment is intentional. The implementation does not claim to retrieve only one metadata record. After resolving the triggering measurement location and its segment, it retrieves measurement-location metadata for the relevant segment so the local model has the contextual set needed around that segment.
 
@@ -99,7 +101,7 @@ The exact request volume depends on what metadata is already present locally and
 
 MCEGold Data Services uses MIMOSA CCOM-based messages. CCOM provides structured relationships and semantic metadata for industrial reliability information. A measurement is therefore not just a numeric value; it is a value connected to an identified measurement, location, asset context, timestamp, value class, and units where applicable.
 
-The v1.0.0 Collector preserves the contextual fields represented by its parser and database schema, including:
+The v1.0.1 Collector preserves the contextual fields represented by its parser and database schema, including:
 
 - measurement UUID;
 - measurement location UUID;

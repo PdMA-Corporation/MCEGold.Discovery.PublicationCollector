@@ -61,7 +61,7 @@ Persist required contextual metadata
 Persist measurement/publication data
 ```
 
-The v1.0.0 implementation uses UUID-specific Connector request commands. If a publication already includes the parent segment UUID, the Collector can use that directly. Otherwise it first resolves the triggering measurement location to find its segment. If the parent segment is not already known locally with enough site context, it resolves segment and site metadata. It then performs targeted segment-level enrichment by retrieving measurement locations for the relevant segment and persists that context before retrying the measurement-location lookup.
+The v1.0.1 implementation uses UUID-specific Connector request commands. If a publication already includes the parent segment UUID, the Collector can use that directly. Otherwise it first resolves the triggering measurement location to find its segment. If the parent segment is not already known locally with enough site context, it resolves segment and site metadata. It then performs targeted segment-level enrichment by retrieving measurement locations for the relevant segment and persists that context before retrying the measurement-location lookup.
 
 This is targeted, incremental discovery for continuous ingestion. It is different from a scheduled full-model refresh or historical backfill engine. A complete top-down discovery can still be appropriate for initial onboarding or building a complete model; this Collector implements publication-driven bottom-up discovery for the context identified by incoming data.
 
@@ -86,7 +86,7 @@ This context is useful for downstream analytics, digital twins, feature engineer
 
 This public-release candidate intentionally does not bundle `MCEGold.Data.Services.Connector.Cli` binaries. The Connector CLI is a required runtime dependency and is distributed separately through `MCEGold.Data.Services.Connector.Toolkit`.
 
-The Collector v1.0.0 release is source-oriented. It provides this repository, Dockerfile, Compose example, configuration examples, documentation, license, tests, and seed database. The repository does not contain a bundled Connector CLI, a prebuilt Docker image, or generated local runtime files.
+The Collector v1.0.1 release is source-oriented. It provides this repository, Dockerfile, Compose example, configuration examples, documentation, license, tests, and seed database. The repository does not contain a bundled Connector CLI, a prebuilt Docker image, or generated local runtime files.
 
 ## Prerequisites
 
@@ -145,6 +145,7 @@ The collector loads JSON configuration from `MCEGOLD_COLLECTOR_CONFIG` when set.
 - `logLevel`, default `INFO`
 - `cliTimeoutSeconds`, default `60`
 - `includeRaw`, default `false`
+- `useSharedRequestSession`, default `false`: reuse a Portal-managed Consumer Request Session for bottom-up discovery when enabled
 
 Environment overrides:
 
@@ -156,6 +157,7 @@ Environment overrides:
 - `MCEGOLD_LOG_LEVEL`
 - `MCEGOLD_CLI_TIMEOUT_SECONDS`
 - `MCEGOLD_INCLUDE_RAW`
+- `MCEGOLD_USE_SHARED_REQUEST_SESSION`
 - `MCEGOLD_PORTAL_LOCAL_CONFIG_PATH`
 
 Standalone deployments should put MCEGold Data Services settings in `connector.config.json` using the Connector CLI shape:
@@ -187,6 +189,14 @@ The collector passes those optional Portal-derived values to the Connector CLI a
 Portal local config is optional compatibility input and is not required for standalone Collector startup.
 
 Do not commit real connector credentials, API keys, `.env` files, `connector.config.json`, `collector.local.json`, or `portal.local.json`.
+
+### Shared Request Session
+
+By default, the Collector opens and closes its own Consumer Request Session for each bottom-up discovery workflow and can run without the Portal running. Set `useSharedRequestSession` to the JSON Boolean `true`, or set `MCEGOLD_USE_SHARED_REQUEST_SESSION=true`, to reuse a Portal-managed Consumer Request Session. A nonempty environment override takes precedence over JSON and accepts only `true` or `false` (case-insensitive, with surrounding whitespace ignored).
+
+Shared mode requires `discoveryDatabasePath` to point to the same live SQLite database used by the Portal, with a compatible schema and a Portal-managed Request Session ID available. A separate copy of the database does not track the Portal's session changes. The Collector reads the Session ID for each discovery workflow and does not open or close the Portal-owned Request Session.
+
+If the shared session is unavailable, the database cannot be read, or discovery fails, the affected publication is retained for a later polling attempt. The Collector does not fall back to opening its own Request Session in shared mode. Publications whose measurement locations are already known do not require a Request Session. The Collector continues to manage its own publication subscription in both modes.
 
 ## Connector CLI Dependency
 
