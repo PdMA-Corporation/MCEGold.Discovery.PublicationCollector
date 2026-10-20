@@ -1,6 +1,6 @@
 # Deployment
 
-This guide describes deploying `MCEGold.Discovery.PublicationCollector` v1.0.0 as a standalone Python process, with Docker as an optional deployment mechanism. Standalone means the Collector has its own process; it still depends on a compatible Discovery database, MCEGold Data Services configuration, and a separately obtained Connector CLI.
+This guide describes deploying `MCEGold.Discovery.PublicationCollector` v1.0.1 as a standalone Python process, with Docker as an optional deployment mechanism. Standalone means the Collector has its own process; it still depends on a compatible Discovery database, MCEGold Data Services configuration, and a separately obtained Connector CLI.
 
 The Collector is a continuous publication-processing service. It opens a Connector CLI publication subscription, polls for staged `syncMeasurements` publications, persists measurements whose locations are already present in the Portal-created Discovery database, and removes each publication only after successful handling.
 
@@ -152,7 +152,8 @@ The distributed `config/collector.example.json` uses container-oriented paths. F
   "pollingIntervalSeconds": 15,
   "logLevel": "INFO",
   "cliTimeoutSeconds": 60,
-  "includeRaw": false
+  "includeRaw": false,
+  "useSharedRequestSession": false
 }
 ```
 
@@ -166,7 +167,12 @@ The Collector recognizes these environment overrides:
 - `MCEGOLD_LOG_LEVEL`
 - `MCEGOLD_CLI_TIMEOUT_SECONDS`
 - `MCEGOLD_INCLUDE_RAW`
+- `MCEGOLD_USE_SHARED_REQUEST_SESSION`
 - `MCEGOLD_PORTAL_LOCAL_CONFIG_PATH`
+
+`useSharedRequestSession` defaults to `false`, so the standalone Collector manages its own Consumer Request Sessions without requiring a running Portal. To reuse a Portal-managed session, set the JSON Boolean to `true` or set `MCEGOLD_USE_SHARED_REQUEST_SESSION=true`. A nonempty environment override takes precedence and accepts only `true` or `false` (case-insensitive, with surrounding whitespace ignored).
+
+Shared mode requires the same live SQLite database used by the Portal and an available Portal-managed Request Session ID. The Collector does not open or close that session; if it is unavailable or discovery fails, the affected publication is retained for a later polling attempt without falling back to a Collector-owned Request Session. See [Shared Request Session](../README.md#shared-request-session) for details.
 
 Do not commit real `collector.local.json`, `connector.config.json`, `portal.local.json`, `.env` files, runtime databases, logs, or Connector CLI payloads.
 
@@ -178,7 +184,7 @@ Standalone deployments use two local configuration files with separate ownership
 config/collector.local.json
   Collector runtime paths and behavior:
   cliPath, connectorConfigPath, discoveryDatabasePath, pollingIntervalSeconds,
-  logLevel, cliTimeoutSeconds, includeRaw
+  logLevel, cliTimeoutSeconds, includeRaw, useSharedRequestSession (default false)
 
 config/connector.config.json
   Connector CLI / MCEGold Data Services settings:
@@ -323,7 +329,7 @@ Docker is optional. It was not the required path for v1.0.0 direct application v
 From the repository root:
 
 ```powershell
-docker build -t mcegold-discovery-publication-collector:1.0.0 .
+docker build -t mcegold-discovery-publication-collector:1.0.1 .
 ```
 
 The Dockerfile installs the Python Collector package only. It does not bundle, download, or redistribute the Connector CLI.
@@ -341,7 +347,7 @@ docker run --rm `
   -v ${PWD}\config:/config:ro `
   -v ${PWD}\data:/data `
   -v ${PWD}\external\mcegold-cli:/opt/mcegold-cli:ro `
-  mcegold-discovery-publication-collector:1.0.0
+  mcegold-discovery-publication-collector:1.0.1
 ```
 
 Adapt path syntax for your host shell and operating system.
