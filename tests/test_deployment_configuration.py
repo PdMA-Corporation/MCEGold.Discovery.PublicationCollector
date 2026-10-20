@@ -181,8 +181,8 @@ def test_python_version_metadata_is_public_release_version() -> None:
     pyproject = (REPO_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     init = (REPO_ROOT / "src" / "mcegold_discovery_publication_collector" / "__init__.py").read_text(encoding="utf-8")
 
-    assert 'version = "1.0.0"' in pyproject
-    assert '__version__ = "1.0.0"' in init
+    assert 'version = "1.0.1"' in pyproject
+    assert '__version__ = "1.0.1"' in init
     assert 'version = "0.1.0"' not in pyproject
     assert '__version__ = "0.1.0"' not in init
 
